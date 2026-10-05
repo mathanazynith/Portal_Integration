@@ -8,7 +8,7 @@ import Transaction from '../models/Transaction.js';
 import pkg from "number-to-words";
 import axios from "axios";
 import ExcelJS from "exceljs";
-import { uploadToS3, deleteFromS3 } from '../config/s3.js';
+import { uploadToS3, deleteFromS3, getSignedUrlForKey } from '../config/s3.js';
 
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -655,10 +655,10 @@ export const generateInvoice = async (req, res) => {
 
     // Load company logo
     try {
-      if (company.logo?.url) {
+      if (company.logo?.public_id) {
         const logoResponse = await axios({
           method: "GET",
-          url: company.logo.url,
+          url: await getSignedUrlForKey(company.logo.public_id),
           responseType: "arraybuffer",
           timeout: 10000
         });
@@ -678,10 +678,10 @@ export const generateInvoice = async (req, res) => {
 
     // Load company signature
     try {
-      if (company.signature?.url) {
+      if (company.signature?.public_id) {
         const signatureResponse = await axios({
           method: "GET",
-          url: company.signature.url,
+          url: await getSignedUrlForKey(company.signature.public_id),
           responseType: "arraybuffer",
           timeout: 10000
         });
@@ -2649,10 +2649,10 @@ export const downloadInvoice = async (req, res) => {
     // ---------------------------------------------------------
 
     try {
-      if (company.logo?.url) {
+      if (company.logo?.public_id) {
         const logoResponse = await axios({
           method: "GET",
-          url: company.logo.url,
+          url: await getSignedUrlForKey(company.logo.public_id),
           responseType: "arraybuffer",
           timeout: 10000
         });
@@ -2677,10 +2677,10 @@ export const downloadInvoice = async (req, res) => {
     // ---------------------------------------------------------
 
     try {
-      if (company.signature?.url) {
+      if (company.signature?.public_id) {
         const signatureResponse = await axios({
           method: "GET",
-          url: company.signature.url,
+          url: await getSignedUrlForKey(company.signature.public_id),
           responseType: "arraybuffer",
           timeout: 10000
         });

@@ -1,5 +1,22 @@
 import Company from '../models/Company.js';
-import { uploadToS3, deleteFromS3 } from '../config/s3.js';
+import { uploadToS3, deleteFromS3, getSignedUrlForKey } from '../config/s3.js';
+
+const companyWithSignedAssetUrls = async (company) => {
+  await Company.updateOne(
+    { _id: company._id },
+    { $unset: { 'logo.url': '', 'signature.url': '' } }
+  );
+
+  const data = company.toObject();
+  for (const type of ['logo', 'signature']) {
+    const key = data[type]?.public_id || '';
+    data[type] = {
+      public_id: key,
+      url: await getSignedUrlForKey(key),
+    };
+  }
+  return data;
+};
  
 //get company info
 export const getCompany = async (req, res) => {
@@ -12,7 +29,7 @@ export const getCompany = async (req, res) => {
         data: {},
       });
     }
-    res.json({ success: true, data: company });
+    res.json({ success: true, data: await companyWithSignedAssetUrls(company) });
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -86,7 +103,7 @@ export const updateCompany = async (req, res) => {
     res.json({
       success: true,
       message: "Company information updated successfully",
-      data: company,
+      data: await companyWithSignedAssetUrls(company),
     });
   } catch (error) {
     res.status(500).json({
@@ -170,13 +187,11 @@ export const uploadImage = async (req, res) => {
     });
    
     console.log('Amazon S3 upload successful:', {
-      public_id: result.public_id,
-      url: result.url
+      key: result.key,
     });
  
     company[type] = {
-      public_id: result.public_id,
-      url: result.url
+      public_id: result.key,
     };
  
     await company.save();
@@ -184,7 +199,7 @@ export const uploadImage = async (req, res) => {
     res.json({
       success: true,
       message: `${type.charAt(0).toUpperCase() + type.slice(1)} uploaded successfully`,
-      data: company
+      data: await companyWithSignedAssetUrls(company)
     });
   } catch (error) {
     console.error('❌ Error in uploadImage:', error);
@@ -237,13 +252,13 @@ export const deleteImage = async (req, res) => {
     }
  
     // Remove image reference from company
-    company[type] = { public_id: '', url: '' };
+    company[type] = { public_id: '' };
     await company.save();
  
     res.json({
       success: true,
       message: `${type.charAt(0).toUpperCase() + type.slice(1)} deleted successfully`,
-      data: company
+      data: await companyWithSignedAssetUrls(company)
     });
   } catch (error) {
     res.status(500).json({

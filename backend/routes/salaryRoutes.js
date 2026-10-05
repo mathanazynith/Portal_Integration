@@ -3,6 +3,7 @@ import Salary from '../models/Salary.js';
 import Payslip from '../models/Payslip.js';
 import Employee from '../models/Employee.js';
 import Company from '../models/Company.js';
+import { getSignedUrlForKey } from '../config/s3.js';
 import { authenticateToken, requireRole } from '../middleware/auth.js';
 import { sendPayslipEmail } from '../services/emailService.js';
 import PDFDocument from 'pdfkit';
@@ -521,10 +522,10 @@ router.get('/payslip/:id/download', async (req, res) => {
   }
   let logoBuffer = null;
   try {
-    if (company.logo?.url) {
+    if (company.logo?.public_id) {
       const logoResponse = await axios({
         method: 'GET',
-        url: company.logo.url,
+        url: await getSignedUrlForKey(company.logo.public_id),
         responseType: 'arraybuffer',
         timeout: 10000
       });
