@@ -27,7 +27,21 @@ export const uploadToS3 = async ({ buffer, originalName, mimetype, folder = 'com
     ContentType: mimetype || 'application/octet-stream',
   }));
 
-  const signedUrl = await getSignedUrl(
+  const url = await getSignedUrlForKey(key);
+
+  return {
+    key,
+    public_id: key,
+    url,
+  };
+};
+
+export const getSignedUrlForKey = async (key) => {
+  if (!key || !process.env.AWS_BUCKET_NAME) {
+    return '';
+  }
+
+  return getSignedUrl(
     s3Client,
     new GetObjectCommand({
       Bucket: process.env.AWS_BUCKET_NAME,
@@ -35,12 +49,6 @@ export const uploadToS3 = async ({ buffer, originalName, mimetype, folder = 'com
     }),
     { expiresIn: 60 * 60 * 24 }
   );
-
-  return {
-    key,
-    public_id: key,
-    url: signedUrl,
-  };
 };
 
 export const deleteFromS3 = async ({ key, public_id }) => {

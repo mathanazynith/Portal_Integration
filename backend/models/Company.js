@@ -67,11 +67,9 @@ const companySchema = new mongoose.Schema({
     // Add these new fields for logo and signature
   logo: {
     public_id: { type: String, default: '' },
-    url: { type: String, default: '' }
   },
   signature: {
     public_id: { type: String, default: '' },
-    url: { type: String, default: '' }
   },
   
   accountNo: {
