@@ -77,7 +77,7 @@ export const startSalaryMonthUpdateJob = () => {
 // const TESTING_MODE = true; // set to false before going live
 
 export const generatePayslipForSalary = async (salaryId, options = {}) => {
-  const { force = false } = options;
+  const { force = false, targetMonth = null, targetYear = null } = options;
   const salary = await Salary.findById(salaryId);
   if (!salary) {
     return { success: false, message: 'Salary record not found' };
@@ -86,10 +86,13 @@ export const generatePayslipForSalary = async (salaryId, options = {}) => {
     return { success: false, message: 'Payslip cannot be generated for disabled salary records' };
   }
 
+  const finalMonth = targetMonth || salary.month;
+  const finalYear = targetYear ? Number(targetYear) : salary.year;
+
   // 🛡️ Month validation guard
-  const monthIndex = monthMap[salary.month] ? monthMap[salary.month] - 1 : null;
+  const monthIndex = monthMap[finalMonth] ? monthMap[finalMonth] - 1 : null;
   if (monthIndex === null) {
-    return { success: false, message: `Unrecognized month format: ${salary.month}` };
+    return { success: false, message: `Unrecognized month format: ${finalMonth}` };
   }
   const now = new Date();
   const currentMonthIndex = now.getMonth();
@@ -97,60 +100,49 @@ export const generatePayslipForSalary = async (salaryId, options = {}) => {
 
   // 1. Block future months
   const isFutureMonth =
-    salary.year > currentYear ||
-    (salary.year === currentYear && monthIndex > currentMonthIndex);
+    finalYear > currentYear ||
+    (finalYear === currentYear && monthIndex > currentMonthIndex);
   if (isFutureMonth) {
     return {
       success: false,
-      message: `Cannot generate payslip for ${salary.month} ${salary.year} — that period hasn't started yet`
+      message: `Cannot generate payslip for ${finalMonth} ${finalYear} — that period hasn't started yet`
     };
-  }
-
-  // 2. Block current ongoing month until the LAST DAY of the month (unless force is true)
-  const isCurrentMonth = (salary.year === currentYear && monthIndex === currentMonthIndex);
-  if (isCurrentMonth && !force) {
-    const lastDayOfMonth = new Date(currentYear, currentMonthIndex + 1, 0).getDate();
-    const isLastDay = (now.getDate() === lastDayOfMonth);
-    if (!isLastDay) {
-      return {
-        success: false,
-        message: `Cannot generate payslip for current month (${salary.month} ${salary.year}) before month-end. Scheduled for the last day of the month (${salary.month} ${lastDayOfMonth}).`
-      };
-    }
   }
 
   const existingPayslip = await Payslip.findOne({
     employeeId: salary.employeeId,
-    month: salary.month,
-    year: salary.year
+    month: finalMonth,
+    year: finalYear
   });
 
   if (existingPayslip) {
-    return { success: false, message: `Payslip already generated for ${salary.month} ${salary.year}` };
+    return { success: false, message: `Payslip already generated for ${finalMonth} ${finalYear}` };
   }
 
-  // Fetch payroll data from HR
-  let hrData;
+  // Fetch payroll data from HR (graceful fallback)
+  let hrData = null;
   try {
-    const numericMonth = monthMap[salary.month] || salary.month;
+    const numericMonth = monthMap[finalMonth] || finalMonth;
+    const hrHeaders = process.env.HR_API_TOKEN ? { Authorization: `Bearer ${process.env.HR_API_TOKEN}` } : {};
     const hrResponse = await axios.get(
       `${HR_API}/api/payroll/payroll-data/${salary.employeeId}`,
-      { params: { year: salary.year, month: numericMonth }, timeout: 10000 }
+      { params: { year: finalYear, month: numericMonth }, headers: hrHeaders, timeout: 5000 }
     );
     hrData = hrResponse.data;
   } catch (err) {
-    console.error(`❌ HR ERROR for ${salary.employeeId}:`, err.response?.data || err.message);
-    return { success: false, message: 'Failed to fetch payroll data from HR portal' };
+    console.warn(`⚠️ HR data fetch skipped for ${salary.employeeId} (${err.response?.data?.error || err.message}). Using salary record values.`);
   }
 
-  // Update salary with leave/LOP data from HR
-  salary.casualLeaveTaken = Number(hrData.casualLeaveTaken) || 0;
-  salary.casualLeaveRemaining = Number(hrData.casualLeaveRemaining) || 0;
-  salary.sickLeaveTaken = Number(hrData.sickLeaveTaken) || 0;
-  salary.sickLeaveRemaining = Number(hrData.sickLeaveRemaining) || 0;
-  salary.lopDays = Number(hrData.lopDays) || 0;
-  salary.paidDays = Number(hrData.paidDays) || 0;
-  await salary.save();
+  // Update salary with leave/LOP data from HR if available and matching current period
+  if (hrData && finalMonth === salary.month && finalYear === salary.year) {
+    salary.casualLeaveTaken = Number(hrData.casualLeaveTaken) || 0;
+    salary.casualLeaveRemaining = Number(hrData.casualLeaveRemaining) || 0;
+    salary.sickLeaveTaken = Number(hrData.sickLeaveTaken) || 0;
+    salary.sickLeaveRemaining = Number(hrData.sickLeaveRemaining) || 0;
+    salary.lopDays = Number(hrData.lopDays) || 0;
+    salary.paidDays = Number(hrData.paidDays) || 0;
+    await salary.save();
+  }
 
   // Create the payslip record
   const payslip = new Payslip({
@@ -160,27 +152,29 @@ export const generatePayslipForSalary = async (salaryId, options = {}) => {
     email: salary.email,
     designation: salary.designation,
     panNo: salary.panNo,
-    month: salary.month,
-    year: salary.year,
+    month: finalMonth,
+    year: finalYear,
     payDate: new Date().toISOString().split('T')[0],
     basicSalary: salary.basicSalary,
     grossEarnings: salary.grossEarnings,
     totalDeductions: salary.totalDeductions,
     netPay: salary.netPay,
-    paidDays: salary.paidDays,
-    lopDays: salary.lopDays,
-    casualLeaveTaken: salary.casualLeaveTaken,
-    casualLeaveRemaining: salary.casualLeaveRemaining,
-    sickLeaveTaken: salary.sickLeaveTaken,
-    sickLeaveRemaining: salary.sickLeaveRemaining,
+    paidDays: salary.paidDays || 30,
+    lopDays: salary.lopDays || 0,
+    casualLeaveTaken: salary.casualLeaveTaken || 0,
+    casualLeaveRemaining: salary.casualLeaveRemaining || 0,
+    sickLeaveTaken: salary.sickLeaveTaken || 0,
+    sickLeaveRemaining: salary.sickLeaveRemaining || 0,
     earnings: salary.earnings,
     deductions: salary.deductions
   });
   await payslip.save();
 
-  // Mark salary as paid
-  salary.status = 'paid';
-  await salary.save();
+  // Mark salary as paid if generating for current record's period
+  if (finalMonth === salary.month && finalYear === salary.year) {
+    salary.status = 'paid';
+    await salary.save();
+  }
 
   // Send email
   const emailResult = await sendPayslipEmail(payslip);
@@ -194,21 +188,13 @@ export const generatePayslipForSalary = async (salaryId, options = {}) => {
 };
 
 /**
- * Auto-generate payslips on the last day of each month at 23:00 (11:00 PM IST)
- * for all active salary records that don't already have one.
+ * Auto-generate payslips for all active salary records that don't already have one.
+ * Runs daily at 00:15 AM (right after the 1st of month update at 00:05 AM, and every day for any pending salaries).
  */
 export const startAutoPayslipGenerationJob = () => {
-  // Runs daily at 23:00 (11:00 PM) in Asia/Kolkata timezone
-  cron.schedule('0 23 * * *', async () => {
+  cron.schedule('15 0 * * *', async () => {
     try {
-      const today = new Date();
-      const lastDayOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
-
-      if (today.getDate() !== lastDayOfMonth) {
-        return; // Not month-end, skip
-      }
-
-      console.log(`📄 Month-end reached (${today.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' })}) — starting auto payslip generation...`);
+      console.log(`📄 Starting daily auto payslip generation check (${new Date().toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' })})...`);
 
       const activeSalaries = await Salary.find({ activeStatus: 'enabled' });
       let generated = 0;
@@ -221,7 +207,6 @@ export const startAutoPayslipGenerationJob = () => {
           console.log(`✅ Payslip auto-generated for ${salary.employeeId}`);
         } else {
           skipped++;
-          console.log(`⏭️ Skipped ${salary.employeeId}: ${result.message}`);
         }
       }
 
@@ -233,7 +218,7 @@ export const startAutoPayslipGenerationJob = () => {
     timezone: 'Asia/Kolkata'
   });
 
-  console.log('✅ Auto payslip generation cron job scheduled (Runs at 23:00 on the last day of each month, Asia/Kolkata)');
+  console.log('✅ Auto payslip generation cron job scheduled (Daily at 00:15 AM, Asia/Kolkata)');
 };
 
 /**
