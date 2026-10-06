@@ -11,7 +11,7 @@ import numberToWords from 'number-to-words';
 import axios from "axios";
 import path from "path";
 import fs from 'fs';
-import { generatePayslipForSalary } from '../services/cronService.js';
+import { generatePayslipForSalary, syncSalaryMonthToCurrent } from '../services/cronService.js';
 
 const HR_API = process.env.HR_API_URL || 'https://hr.zynith-it.com'; // HR service URL from env or default
 
@@ -463,7 +463,7 @@ router.post('/payslip', authenticateToken, requireRole('admin'), async (req, res
 });
 
 // Auto-generate payslip for a specific salary by ID (Admin only)
-router.post('/salary/:salaryId/generate-payslip', authenticateToken, requireRole('admin'), async (req, res) => {
+const handleGeneratePayslip = async (req, res) => {
   try {
     const { force = true } = req.body;
     const result = await generatePayslipForSalary(req.params.salaryId, { force });
@@ -477,7 +477,10 @@ router.post('/salary/:salaryId/generate-payslip', authenticateToken, requireRole
     console.error('Error generating payslip:', error);
     res.status(500).json({ message: 'Server error while generating payslip', error: error.message });
   }
-});
+};
+
+router.post('/salary/:salaryId/generate-payslip', authenticateToken, requireRole('admin'), handleGeneratePayslip);
+router.post('/:salaryId/generate-payslip', authenticateToken, requireRole('admin'), handleGeneratePayslip);
 
 router.get('/payslip/:id/download', async (req, res) => {
     try {
@@ -871,9 +874,27 @@ router.get('/employee/:employeeId/hike-history', authenticateToken, async (req, 
   }
 });
 
+// Sync active salaries to current calendar month (Admin only)
+router.post('/sync-month', authenticateToken, requireRole('admin'), async (req, res) => {
+  try {
+    const result = await syncSalaryMonthToCurrent();
+    res.json({
+      message: `Active salaries synced to ${result.currentMonth} ${result.currentYear}`,
+      ...result
+    });
+  } catch (error) {
+    console.error('Error syncing salary month:', error);
+    res.status(500).json({ message: 'Server error while syncing salary month', error: error.message });
+  }
+});
+
 // Check and auto-regenerate missing payslips for ended months
 router.post('/check-missing-payslips', authenticateToken, async (req, res) => {
   try {
+    // 1. Ensure current month & status are synced
+    await syncSalaryMonthToCurrent();
+
+    // 2. Safely check for any missing payslips (current ongoing month is protected by the guard)
     const activeSalaries = await Salary.find({ activeStatus: 'enabled' });
     let restored = 0;
 

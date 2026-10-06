@@ -214,15 +214,25 @@ async getHikeHistory(employeeId, filters = {}) {
     throw error;
   }
 },
-// check for missing payslips
-async checkMissingPayslips() {
-  try {
-    const response = await api.post('/salaries/check-missing-payslips');
-    return response.data;
-  } catch (error) {
-    console.error('Error checking missing payslips:', error);
-    throw error;
-  }
-}
+  // check for missing payslips
+  async checkMissingPayslips() {
+    try {
+      const response = await api.post('/salaries/check-missing-payslips');
+      return response.data;
+    } catch (error) {
+      console.error('Error checking missing payslips:', error);
+      throw error;
+    }
+  },
 
+  // Sync active salaries to current calendar month
+  async syncCurrentMonth() {
+    try {
+      const response = await api.post('/salaries/sync-month');
+      return response.data;
+    } catch (error) {
+      console.error('Error syncing current month:', error);
+      throw error;
+    }
+  }
 };

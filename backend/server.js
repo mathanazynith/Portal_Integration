@@ -15,7 +15,7 @@ import companyRoutes from './routes/companyRoutes.js';
 import categoryRoutes from './routes/categoryRoutes.js'
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { startHikeCronJob, startSalaryMonthUpdateJob, startAutoPayslipGenerationJob, startMissingPayslipRecoveryJob } from './services/cronService.js';
+import { startHikeCronJob, startSalaryMonthUpdateJob, startAutoPayslipGenerationJob, startMissingPayslipRecoveryJob, syncSalaryMonthToCurrent } from './services/cronService.js';
 import Salary from './models/Salary.js'; // Import Salary model for manual trigger
 import salaryTemplateRoutes from './routes/salaryTemplateRoutes.js';
 import DesignationRoutes from './routes/designationRoutes.js';
@@ -137,13 +137,20 @@ mongoose.connect(process.env.MONGODB_URI,
     useUnifiedTopology: true,
   }
 )
-  .then(() =>{ console.log('✅ Connected to MongoDB');
-  // Start the cron jobs after successful database connection
+  .then(async () => {
+    console.log('✅ Connected to MongoDB');
+    // Ensure active salaries match the current month & year on startup
+    try {
+      await syncSalaryMonthToCurrent();
+    } catch (syncErr) {
+      console.error('⚠️ Could not sync salary month on startup:', syncErr.message);
+    }
+    // Start the cron jobs after successful database connection
     startHikeCronJob();
     startSalaryMonthUpdateJob();
     startAutoPayslipGenerationJob();
     startMissingPayslipRecoveryJob();
-    })
+  })
   .catch((error) => console.error('❌ MongoDB connection error:', error));
 
 const PORT = process.env.PORT || 5003;
